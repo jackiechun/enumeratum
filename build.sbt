@@ -1,6 +1,6 @@
 import com.typesafe.sbt.SbtGit.{GitKeys => git}
 
-lazy val theScalaVersion = "2.11.11"
+lazy val theScalaVersion = "2.12.2"
 
 lazy val scalaVersions = Seq("2.10.6", "2.11.11", "2.12.2")
 
@@ -82,7 +82,10 @@ lazy val macros = crossProject
     name := "enumeratum-macros",
     version := Versions.Macros.head,
     libraryDependencies ++= Seq(
-      "org.scala-lang" % "scala-reflect" % scalaVersion.value
+      "org.scala-lang" % "scala-reflect"  % scalaVersion.value,
+      "org.typelevel"  %% "macro-compat"  % "1.1.1",
+      "org.scala-lang" % "scala-compiler" % scalaVersion.value % "provided",
+      compilerPlugin("org.scalamacros" % "paradise" % "2.1.0" cross CrossVersion.patch)
     )
   )
   .settings(testSettings: _*)
@@ -97,11 +100,11 @@ lazy val core = crossProject
   .settings(
     name := "enumeratum",
     version := Versions.Core.head,
-    libraryDependencies += "com.beachape" %% "enumeratum-macros" % Versions.Macros.stable
+    crossScalaVersions := scalaVersions
   )
   .settings(testSettings: _*)
   .settings(commonWithPublishSettings: _*)
-//  .dependsOn(macros) // used for testing macros
+  .dependsOn(macros) // used for testing macros
 lazy val coreJS  = core.js
 lazy val coreJVM = core.jvm
 
@@ -114,18 +117,11 @@ lazy val enumeratumTest = crossProject
   .settings(commonWithPublishSettings: _*)
   .settings(
     name := "enumeratum-test",
-    version := Versions.Core.stable,
-    libraryDependencies += {
-      import org.scalajs.sbtplugin._
-      val crossVersion =
-        if (ScalaJSPlugin.autoImport.jsDependencies.?.value.isDefined)
-          ScalaJSCrossVersion.binary
-        else
-          CrossVersion.binary
-      impl.ScalaJSGroupID
-        .withCross("com.beachape", "enumeratum", crossVersion) % Versions.Core.stable
-    }
+    version := Versions.Core.head,
+    crossScalaVersions := scalaVersions,
+    libraryDependencies += "org.spire-math" %% "spire" % "0.13.0"
   )
+  .dependsOn(core)
 lazy val enumeratumTestJs  = enumeratumTest.js
 lazy val enumeratumTestJvm = enumeratumTest.jvm
 
@@ -153,11 +149,9 @@ lazy val enumeratumReactiveMongoBson =
       crossScalaVersions := scalaVersions,
       version := "1.5.13-SNAPSHOT",
       libraryDependencies ++= Seq(
-        "org.reactivemongo" %% "reactivemongo"   % reactiveMongoVersion,
-        "com.beachape"      %% "enumeratum"      % Versions.Core.stable,
-        "com.beachape"      %% "enumeratum-test" % Versions.Core.stable % Test
+        "org.reactivemongo" %% "reactivemongo"   % reactiveMongoVersion
       )
-    )
+    ).dependsOn(core, test)
 
 lazy val enumeratumPlayJson = Project(id = "enumeratum-play-json",
                                       base = file("enumeratum-play-json"),
@@ -168,11 +162,9 @@ lazy val enumeratumPlayJson = Project(id = "enumeratum-play-json",
     crossScalaVersions := scalaVersions,
     libraryDependencies ++= Seq(
       "com.typesafe.play" %% "play-json"       % thePlayJsonVersion(scalaVersion.value),
-      "com.beachape"      %% "enumeratum"      % Versions.Core.stable,
-      "com.beachape"      %% "enumeratum-test" % Versions.Core.stable % Test,
       "org.joda"          % "joda-convert"     % "1.8.1" % Provided
     )
-  )
+  ).dependsOn(core, enumeratumTest)
 
 lazy val enumeratumPlay = Project(id = "enumeratum-play",
                                   base = file("enumeratum-play"),
@@ -183,12 +175,10 @@ lazy val enumeratumPlay = Project(id = "enumeratum-play",
     crossScalaVersions := scalaVersions,
     libraryDependencies ++= Seq(
       "com.typesafe.play" %% "play"            % thePlayVersion(scalaVersion.value),
-      "com.beachape"      %% "enumeratum"      % Versions.Core.stable,
-      "com.beachape"      %% "enumeratum-test" % Versions.Core.stable % Test,
       scalaTestPlay(scalaVersion.value)
     )
   )
-  .dependsOn(enumeratumPlayJson % "test->test;compile->compile")
+  .dependsOn(core, enumeratumTest, enumeratumPlayJson % "test->test;compile->compile")
 
 lazy val uPickleAggregate = aggregateProject("upickle", enumeratumUPickleJs, enumeratumUPickleJvm)
 lazy val enumeratumUPickle = crossProject
@@ -208,8 +198,7 @@ lazy val enumeratumUPickle = crossProject
           CrossVersion.binary
       }
       Seq(
-        impl.ScalaJSGroupID.withCross("com.lihaoyi", "upickle", cross)     % uPickleVersion,
-        impl.ScalaJSGroupID.withCross("com.beachape", "enumeratum", cross) % Versions.Core.stable
+        impl.ScalaJSGroupID.withCross("com.lihaoyi", "upickle", cross)     % uPickleVersion
       )
     } ++ {
       val additionalMacroDeps =
@@ -223,7 +212,8 @@ lazy val enumeratumUPickle = crossProject
         }
       additionalMacroDeps
     }
-  )
+  ).dependsOn(core)
+
 lazy val enumeratumUPickleJs  = enumeratumUPickle.js
 lazy val enumeratumUPickleJvm = enumeratumUPickle.jvm
 
@@ -264,20 +254,10 @@ lazy val enumeratumArgonaut = crossProject
     name := "enumeratum-argonaut",
     version := "1.5.13-SNAPSHOT",
     crossScalaVersions := scalaVersions,
-    libraryDependencies ++= {
-      import org.scalajs.sbtplugin._
-      val cross = {
-        if (ScalaJSPlugin.autoImport.jsDependencies.?.value.isDefined)
-          ScalaJSCrossVersion.binary
-        else
-          CrossVersion.binary
-      }
-      Seq(
-        impl.ScalaJSGroupID.withCross("io.argonaut", "argonaut", cross)    % argonautVersion,
-        impl.ScalaJSGroupID.withCross("com.beachape", "enumeratum", cross) % Versions.Core.stable
-      )
-    }
-  )
+    libraryDependencies ++= Seq(
+      impl.ScalaJSGroupID.withCross("io.argonaut", "argonaut", cross)    % argonautVersion
+    )
+  ).dependsOn(core)
 
 lazy val enumeratumArgonautJs  = enumeratumArgonaut.js
 lazy val enumeratumArgonautJvm = enumeratumArgonaut.jvm
@@ -328,8 +308,8 @@ lazy val ideSettings = Seq(
 lazy val compilerSettings = Seq(
   // the name-hashing algorithm for the incremental compiler.
   incOptions := incOptions.value.withNameHashing(nameHashing = true),
-  wartremoverErrors in (Compile, compile) ++= Warts.unsafe
-    .filterNot(_ == Wart.DefaultArguments) :+ Wart.ExplicitImplicitTypes,
+//  wartremoverErrors in (Compile, compile) ++= Warts.unsafe
+//    .filterNot(_ == Wart.DefaultArguments) :+ Wart.ExplicitImplicitTypes,
   scalacOptions in (Compile, compile) ++= {
     val base = Seq(
       "-Xlog-free-terms",
