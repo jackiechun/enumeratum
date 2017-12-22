@@ -16,7 +16,7 @@ class ValueEnumMacros(val c: blackbox.Context) {
     * Note, requires the ValueEntryType to have a 'value' member that has a literal value
     */
   def findIntValueEntriesImpl[ValueEntryType: c.WeakTypeTag]: c.Expr[IndexedSeq[ValueEntryType]] = {
-    findValueEntriesImpl[ValueEntryType, ContextUtils.CTInt, Int](identity)
+    findValueEntriesImpl[ValueEntryType, Int]
   }
 
   /**
@@ -25,7 +25,7 @@ class ValueEnumMacros(val c: blackbox.Context) {
     * Note, requires the ValueEntryType to have a 'value' member that has a literal value
     */
   def findLongValueEntriesImpl[ValueEntryType: c.WeakTypeTag]: c.Expr[IndexedSeq[ValueEntryType]] = {
-    findValueEntriesImpl[ValueEntryType, ContextUtils.CTLong, Long](identity)
+    findValueEntriesImpl[ValueEntryType, Long]
   }
 
   /**
@@ -37,7 +37,7 @@ class ValueEnumMacros(val c: blackbox.Context) {
     *  - the Short value should be a literal Int (do no need to cast .toShort).
     */
   def findShortValueEntriesImpl[ValueEntryType: c.WeakTypeTag]: c.Expr[IndexedSeq[ValueEntryType]] = {
-    findValueEntriesImpl[ValueEntryType, ContextUtils.CTShort, Short](_.toShort) // do a transform because there is no such thing as Short literals
+    findValueEntriesImpl[ValueEntryType, Short]
   }
 
   /**
@@ -48,7 +48,7 @@ class ValueEnumMacros(val c: blackbox.Context) {
     *  - requires the ValueEntryType to have a 'value' member that has a literal value
     */
   def findStringValueEntriesImpl[ValueEntryType: c.WeakTypeTag]: c.Expr[IndexedSeq[ValueEntryType]] = {
-    findValueEntriesImpl[ValueEntryType, String, String](identity)
+    findValueEntriesImpl[ValueEntryType, String]
   }
 
   /**
@@ -59,7 +59,7 @@ class ValueEnumMacros(val c: blackbox.Context) {
     *  - requires the ValueEntryType to have a 'value' member that has a literal value
     */
   def findByteValueEntriesImpl[ValueEntryType: c.WeakTypeTag]: c.Expr[IndexedSeq[ValueEntryType]] = {
-    findValueEntriesImpl[ValueEntryType, ContextUtils.CTInt, Byte](_.toByte)
+    findValueEntriesImpl[ValueEntryType, Byte]
   }
 
   /**
@@ -70,13 +70,13 @@ class ValueEnumMacros(val c: blackbox.Context) {
     *  - requires the ValueEntryType to have a 'value' member that has a literal value
     */
   def findCharValueEntriesImpl[ValueEntryType: c.WeakTypeTag]: c.Expr[IndexedSeq[ValueEntryType]] = {
-    findValueEntriesImpl[ValueEntryType, ContextUtils.CTChar, Char](identity)
+    findValueEntriesImpl[ValueEntryType, Char]
   }
 
   /**
     * The method that does the heavy lifting.
     */
-  private[this] def findValueEntriesImpl[ValueEntryType: c.WeakTypeTag, ValueType: ClassTag, ProcessedValue](processFoundValues: ValueType => ProcessedValue): c.Expr[IndexedSeq[ValueEntryType]] = {
+  private[this] def findValueEntriesImpl[ValueEntryType: c.WeakTypeTag, ValueType: ClassTag]: c.Expr[IndexedSeq[ValueEntryType]] = {
     import c.universe._
     val typeSymbol = weakTypeOf[ValueEntryType].typeSymbol
     EnumMacros.validateType(c)(typeSymbol)
@@ -85,13 +85,9 @@ class ValueEnumMacros(val c: blackbox.Context) {
     // Find the parameters for the constructors of ValueEntryType
     val valueEntryTypeConstructorsParams = findConstructorParamsLists[ValueEntryType]
     // Identify the value:ValueType implementations for each of the trees we found and process them if required
-    val treeWithVals = findValuesForSubclassTrees[ValueType, ProcessedValue](
-      valueEntryTypeConstructorsParams,
-      subclassTrees,
-      processFoundValues
-    )
+    val treeWithVals = findValuesForSubclassTrees[ValueType](valueEntryTypeConstructorsParams, subclassTrees)
     // Make sure the processed found value implementations are unique
-    ensureUnique[ProcessedValue](treeWithVals)
+    ensureUnique[ValueType](treeWithVals)
     // Finish by building our Sequence
     val subclassSymbols = treeWithVals.map(_.tree.symbol)
     EnumMacros.buildSeqExpr[ValueEntryType](c)(subclassSymbols)
@@ -102,17 +98,11 @@ class ValueEnumMacros(val c: blackbox.Context) {
     *
     * Will abort compilation if not all the trees provided have a literal value member/constructor argument
     */
-  private[this] def findValuesForSubclassTrees[ValueType: ClassTag, ProcessedValueType](
+  private[this] def findValuesForSubclassTrees[ValueType: ClassTag](
       valueEntryCTorsParams: List[List[c.universe.Name]],
-      memberTrees: Seq[c.universe.ModuleDef],
-      processFoundValues: ValueType => ProcessedValueType
-  ): Seq[TreeWithVal[c.universe.ModuleDef, ProcessedValueType]] = {
+      memberTrees: Seq[c.universe.ModuleDef]): Seq[TreeWithVal[c.universe.ModuleDef, ValueType]] = {
 
-    val treeWithValues = toTreeWithMaybeVals[ValueType, ProcessedValueType](
-      valueEntryCTorsParams,
-      memberTrees,
-      processFoundValues
-    )
+    val treeWithValues = toTreeWithMaybeVals[ValueType](valueEntryCTorsParams, memberTrees)
 
     val (hasValueMember, lacksValueMember) = treeWithValues.partition(_.maybeValue.isDefined)
 
@@ -156,11 +146,10 @@ class ValueEnumMacros(val c: blackbox.Context) {
     *
     * Aborts compilation if the value declaration/constructor is of the wrong type,
     */
-  private[this] def toTreeWithMaybeVals[ValueType, ProcessedValueType](
+  private[this] def toTreeWithMaybeVals[ValueType](
       valueEntryCTorsParams: List[List[c.universe.Name]],
-      memberTrees: Seq[c.universe.ModuleDef],
-      processFoundValues: ValueType => ProcessedValueType
-  )(implicit classTag: ClassTag[ValueType]): Seq[TreeWithMaybeVal[c.universe.ModuleDef, ProcessedValueType]] = {
+      memberTrees: Seq[c.universe.ModuleDef]
+  )(implicit classTag: ClassTag[ValueType]): Seq[TreeWithMaybeVal[c.universe.ModuleDef, ValueType]] = {
     val valueTerm = TermName("value")
     // go through all the trees
     memberTrees.map { declTree =>
@@ -215,7 +204,7 @@ class ValueEnumMacros(val c: blackbox.Context) {
 
       val values = valuesFromMembers ++ valuesFromConstructors
       val processedValue = values.collectFirst {
-        case Some(v) => processFoundValues(v)
+        case Some(v) => v
       }
       TreeWithMaybeVal(declTree, processedValue)
     }
